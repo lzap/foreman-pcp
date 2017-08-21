@@ -1,0 +1,66 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Date::Parse;
+use Date::Format;
+use PCP::LogImport;
+
+# Tutorial at: http://pcp.io/docs/lab.importdata.html
+# 2017-08-18 13:06:32,227 [thread=http-bio-8443-exec-10] [req=10e255c9-c595-4dc1-bbd1-b54d38977013, org=] INFO  org.candlepin.common.filter.LoggingFilter - Request: verb=GET, uri=/candlepin/consumers/b2dfaa7f-2f72-460b-aaa2-81d8c1033bfa
+# 2017-08-18 13:06:32,296 [thread=http-bio-8443-exec-10] [req=10e255c9-c595-4dc1-bbd1-b54d38977013, org=Sat6-CI] INFO  org.candlepin.audit.HornetqEventDispatcher - Sending event: Event [id=null, target=COMPLIANCE, type=CREATED, time=Fri Aug 18 13:06:32 EDT 2017, entity=8a88800f5d84cb49015ddc2f5eb92c12]
+# 2017-08-18 13:06:32,344 [thread=http-bio-8443-exec-10] [req=10e255c9-c595-4dc1-bbd1-b54d38977013, org=Sat6-CI] INFO  org.candlepin.common.filter.LoggingFilter - Response: status=200, content-type="application/json", time=117
+
+my %session_action; my %session_start;
+
+pmiStart("foreman-candlepin", 0);
+#pmiSetTimezone("");
+
+my %duration_metrics;
+sub ensure_duration_metric {
+  my ($name) = @_;
+  return if $duration_metrics{$name};
+  my $result = pmiAddMetric($name, PM_ID_NULL, PM_TYPE_FLOAT, PM_INDOM_NULL, PM_SEM_INSTANT, pmiUnits(0,1,0,0,PM_TIME_MSEC,PM_COUNT_ONE));
+  if ($result != 0) {
+    my $msg = pmiErrStr($result);
+    die "Failed to add metric '$name', $msg\n";
+  }
+  $duration_metrics{$name} = 1;
+}
+
+while (<>) {
+  chomp;
+  if (/Request: verb=/) {
+    my ($req, $verb, $uri) = (m/req=([a-f0-9-]+),.*verb=(\w+), uri=([a-zA-Z0-9\/_-]+)/);
+    $verb = lc $verb;
+    $uri = ($uri =~ s/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/UUID/r);
+    $uri = ($uri =~ s/[0-9a-f]{32}/UUID/r);
+    $uri = ($uri =~ s/\//./gr);
+    $uri =~ s/[^a-zA-Z0-9.]//g;
+    $uri = ($uri =~ s/\.\d+(\.|$)/.ID./r);
+    $uri = ($uri =~ s/\.$//r);
+    $session_action{$req} = "${verb}$uri";
+  } elsif (/Response: status=/) {
+    my ($req, $status, $duration) = (m/req=([a-f0-9-]+),.*status=(\d+),.*time=(\d+)/);
+    my ($date, $time_milis, $rest) = split(/\s+/, $_, 3);
+    my ($time, $milis) = split(/,/, $time_milis, 2);
+    my $when = str2time("${date}T${time}");
+    my $uri = $session_action{$req};
+    if ($when && $uri) {
+      my $metric = "candlepin.duration.$uri";
+      print "$when $req $metric $duration\n";
+      ensure_duration_metric($metric);
+      my $result = pmiPutValue($metric, "", $duration);
+      if ($result != 0) {
+        my $msg = pmiErrStr($result);
+        die "Failed to put db value in '$metric', $msg\n";
+      }
+      delete $session_action{$req};
+      my $result = pmiWrite($when, $milis);
+      if ($result != 0) {
+        my $msg = pmiErrStr($result);
+        die "Failed to write '$when', $msg\n";
+      }
+    }
+  }
+}
+pmiEnd();

@@ -1,0 +1,91 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Date::Parse;
+use Date::Format;
+use PCP::LogImport;
+
+# Tutorial at: http://pcp.io/docs/lab.importdata.html
+# 2017-06-14 03:16:07 cbf99d58 [app] [I] Started POST "/api/reports" for 161.1.1.1 at 2017-06-14 03:16:07 +0200
+# 2017-06-14 03:16:07 cbf99d58 [app] [I] Processing by Api::V2::ReportsController#create as JSON
+# 2017-06-14 03:16:07 cbf99d58 [app] [I]   Parameters: {"report"=>"[FILTERED]", "apiv"=>"v2"}
+# 2017-06-14 03:16:07 cbf99d58 [app] [I] processing report for xxx.ch.xxx.net
+# 2017-06-14 03:16:07 cbf99d58 [app] [I] Imported report for xxx.ch.xxx.net in 0.1 seconds
+# 2017-06-14 03:16:08 cbf99d58 [app] [I]   Rendered api/v2/reports/create.json.rabl (7.1ms)
+# 2017-06-14 03:16:08 cbf99d58 [app] [I] Completed 201 Created in 332ms (Views: 7.5ms | ActiveRecord: 59.7ms)
+
+my $timezone = "";
+my $epoch = 0;
+my $last_time = 0;
+my %session_action; my %session_start;
+
+pmiStart("foreman-rails", 0);
+my %duration_metrics;
+my $duration_indom = pmInDom_build(PMI_DOMAIN, 0);
+sub ensure_duration_metric {
+  my ($name) = @_;
+  return if $duration_metrics{$name};
+  my $result = pmiAddMetric($name, PM_ID_NULL, PM_TYPE_FLOAT, $duration_indom, PM_SEM_INSTANT, pmiUnits(0,1,0,0,PM_TIME_MSEC,PM_COUNT_ONE));
+  if ($result != 0) {
+    my $msg = pmiErrStr($result);
+    die "Failed to add metric '$name', $msg\n";
+  }
+  pmiAddInstance($duration_indom, "total", 0);
+  pmiAddInstance($duration_indom, "view", 1);
+  pmiAddInstance($duration_indom, "db", 2);
+  $duration_metrics{$name} = 1;
+}
+
+while (<>) {
+  chomp;
+  my ($date, $time, $id, $logger, $level, $first, $second, $third, $rest) = split(/\s+/, $_, 9);
+  next unless $first;
+  if ($timezone eq "" && $first eq "Started" && $rest =~ /[+-]\d\d\d\d$/) {
+    ($timezone) = ($rest =~ /([+-]\d\d\d\d)$/);
+    pmiSetTimezone($timezone);
+  } elsif ($first eq "Processing" && $second eq "by") {
+    $third =~ s/[:#]+/./g;
+    $session_action{$id} = $third;
+  } elsif ($first eq "Completed" && $second =~ /\d\d\d/) {
+    my $when = str2time("${date}T${time}");
+    my $action = $session_action{$id};
+    if ($when && $action) {
+      my $metric = "foreman.rails.duration.$action";
+      my ($total) = ($rest =~ m/in ([0-9\.]+)ms/);
+      my ($database) = ($rest =~ m/ActiveRecord: ([0-9\.]+)ms/);
+      my ($views) = ($rest =~ m/Views: ([0-9\.]+)ms/);
+      #print "$when $metric $total $views $database\n";
+      ensure_duration_metric($metric);
+      my $result = pmiPutValue($metric, "total", $total);
+      if ($result != 0) {
+        my $msg = pmiErrStr($result);
+        die "Failed to put total value in '$metric', $msg\n";
+      }
+      if ($views) {
+        $result = pmiPutValue($metric, "view", $views);
+        if ($result != 0) {
+          my $msg = pmiErrStr($result);
+          die "Failed to put view value in '$metric', $msg\n";
+        }
+      }
+      if ($database) {
+        $result = pmiPutValue($metric, "db", $database);
+        if ($result != 0) {
+          my $msg = pmiErrStr($result);
+          die "Failed to put db value in '$metric', $msg\n";
+        }
+      }
+      delete $session_action{$id};
+      $result = pmiWrite($when, $epoch);
+      if ($result != 0) {
+        my $msg = pmiErrStr($result);
+        die "Failed to write '$when', $msg\n";
+      }
+      if ($when > $last_time) {
+        $epoch = 0;
+        $last_time = $when;
+      }
+    }
+  }
+}
+pmiEnd();
