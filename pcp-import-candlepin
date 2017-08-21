@@ -10,6 +10,7 @@ use PCP::LogImport;
 # 2017-08-18 13:06:32,296 [thread=http-bio-8443-exec-10] [req=10e255c9-c595-4dc1-bbd1-b54d38977013, org=Sat6-CI] INFO  org.candlepin.audit.HornetqEventDispatcher - Sending event: Event [id=null, target=COMPLIANCE, type=CREATED, time=Fri Aug 18 13:06:32 EDT 2017, entity=8a88800f5d84cb49015ddc2f5eb92c12]
 # 2017-08-18 13:06:32,344 [thread=http-bio-8443-exec-10] [req=10e255c9-c595-4dc1-bbd1-b54d38977013, org=Sat6-CI] INFO  org.candlepin.common.filter.LoggingFilter - Response: status=200, content-type="application/json", time=117
 
+my $metric_id = 0;
 my %session_action; my %session_start;
 
 pmiStart("foreman-candlepin", 0);
@@ -19,7 +20,9 @@ my %duration_metrics;
 sub ensure_duration_metric {
   my ($name) = @_;
   return if $duration_metrics{$name};
-  my $result = pmiAddMetric($name, PM_ID_NULL, PM_TYPE_FLOAT, PM_INDOM_NULL, PM_SEM_INSTANT, pmiUnits(0,1,0,0,PM_TIME_MSEC,PM_COUNT_ONE));
+  my $pmid = pmid_build(PMI_DOMAIN, 1, $metric_id);
+  $metric_id += 1;
+  my $result = pmiAddMetric($name, $pmid, PM_TYPE_FLOAT, PM_INDOM_NULL, PM_SEM_INSTANT, pmiUnits(0,1,0,0,PM_TIME_MSEC,PM_COUNT_ONE));
   if ($result != 0) {
     my $msg = pmiErrStr($result);
     die "Failed to add metric '$name', $msg\n";
@@ -47,7 +50,7 @@ while (<>) {
     my $uri = $session_action{$req};
     if ($when && $uri) {
       my $metric = "candlepin.duration.$uri";
-      print "$when $req $metric $duration\n";
+      #print "$when $req $metric $duration\n";
       ensure_duration_metric($metric);
       my $result = pmiPutValue($metric, "", $duration);
       if ($result != 0) {
@@ -55,7 +58,7 @@ while (<>) {
         die "Failed to put db value in '$metric', $msg\n";
       }
       delete $session_action{$req};
-      my $result = pmiWrite($when, $milis);
+      $result = pmiWrite($when, $milis);
       if ($result != 0) {
         my $msg = pmiErrStr($result);
         die "Failed to write '$when', $msg\n";

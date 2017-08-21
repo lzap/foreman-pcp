@@ -14,6 +14,7 @@ use PCP::LogImport;
 # 2017-06-14 03:16:08 cbf99d58 [app] [I]   Rendered api/v2/reports/create.json.rabl (7.1ms)
 # 2017-06-14 03:16:08 cbf99d58 [app] [I] Completed 201 Created in 332ms (Views: 7.5ms | ActiveRecord: 59.7ms)
 
+my $metric_id = 0;
 my $timezone = "";
 my $epoch = 0;
 my $last_time = 0;
@@ -25,7 +26,9 @@ my $duration_indom = pmInDom_build(PMI_DOMAIN, 0);
 sub ensure_duration_metric {
   my ($name) = @_;
   return if $duration_metrics{$name};
-  my $result = pmiAddMetric($name, PM_ID_NULL, PM_TYPE_FLOAT, $duration_indom, PM_SEM_INSTANT, pmiUnits(0,1,0,0,PM_TIME_MSEC,PM_COUNT_ONE));
+  my $pmid = pmid_build(PMI_DOMAIN, 0, $metric_id);
+  $metric_id += 1;
+  my $result = pmiAddMetric($name, $pmid, PM_TYPE_FLOAT, $duration_indom, PM_SEM_INSTANT, pmiUnits(0,1,0,0,PM_TIME_MSEC,PM_COUNT_ONE));
   if ($result != 0) {
     my $msg = pmiErrStr($result);
     die "Failed to add metric '$name', $msg\n";
