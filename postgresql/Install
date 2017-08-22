@@ -1,0 +1,36 @@
+#! /bin/sh
+
+. $PCP_DIR/etc/pcp.env
+. $PCP_SHARE_DIR/lib/pmdaproc.sh
+
+iam=foremantasks
+perl_opt=true
+daemon_opt=false
+
+perl -e "use DBI" 2>/dev/null
+if test $? -ne 0; then
+    echo "Perl database interface (DBI) is not installed"
+    status=1
+    exit
+fi
+
+perl -e "use YAML" 2>/dev/null
+if test $? -ne 0; then
+    echo "Perl YAML (YAML) is not installed"
+    status=1
+    exit
+fi
+
+perl -e "use DBD::Pg" 2>/dev/null
+if test $? -ne 0; then
+    echo "Postgres database driver (DBD::Pg) is not installed"
+    status=1
+    exit
+fi
+
+touch /var/lib/pcp/config/pmda/401.0
+chown postgres /var/lib/pcp/config/pmda/401.0
+
+pmdaSetup
+pmdaInstall
+exit

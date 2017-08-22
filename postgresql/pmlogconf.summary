@@ -1,0 +1,6 @@
+#pmlogconf-setup 2.0
+ident   foreman tasks stats
+probe foreman.tasks.running ? include : exclude
+  foreman.tasks.running
+  foreman.tasks.pending
+  foreman.tasks.duration
