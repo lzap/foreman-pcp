@@ -17,17 +17,27 @@ use YAML qw(LoadFile);
 use PCP::PMDA;
 use DBI;
 
-use vars qw( $pmda $dbh $avg_indom %avg_idx );
+use vars qw( $pmda $dbh $avg_indom );
 my $os_user = 'postgres';
 my $config = LoadFile('/etc/foreman/database.yml');
 my $dbname = $config->{production}->{database};
 my $database = "dbi:Pg:dbname=${dbname};host=localhost";
+my %avg_idx = ();
 my %averages;
 
 for my $file (  '/etc/pcpdbi.conf', # system defaults (lowest priority)
   pmda_config('PCP_PMDAS_DIR') . '/postgresql/postgresql.conf',
   './postgresql.conf' ) { # current directory (high priority)
   eval `cat $file` unless ! -f $file;
+}
+
+sub sql {
+  my $sth = $dbh->prepare(shift)
+    or die "Couldn't prepare statement: " . $dbh->errstr;
+
+  $sth->execute(@_)
+    or die "Couldn't execute statement: " . $sth->errstr;
+  return $sth;
 }
 
 sub pmda_connection_setup
@@ -39,7 +49,6 @@ sub pmda_connection_setup
       or die "Couldn't connect to database";
   }
 
-  %avg_idx = ();
   %averages = ();
   my $counter = 0;
   my $result = sql("select label, avg(extract(epoch from (ended_at - started_at))) as duration from foreman_tasks_tasks where ended_at > now() - interval '1 day' and (state != 'pending' and state != 'running') and (label != 'Actions::Candlepin::ListenOnCandlepinEvents' and label != 'Actions::Katello::EventQueue::Monitor') group by label order by duration desc");
@@ -50,16 +59,8 @@ sub pmda_connection_setup
     $averages{$counter} = $avg;
     $counter += 1;
   }
+  # perhaps call this only when %avg_idx changes?
   $pmda->replace_indom( $avg_indom, \%avg_idx);
-}
-
-sub sql {
-  my $sth = $dbh->prepare(shift)
-    or die "Couldn't prepare statement: " . $dbh->errstr;
-
-  $sth->execute(@_)
-    or die "Couldn't execute statement: " . $sth->errstr;
-  return $sth;
 }
 
 sub pmda_fetch_callback
