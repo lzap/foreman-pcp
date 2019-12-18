@@ -16,7 +16,6 @@ use PCP::LogImport;
 
 my $metric_id = 0;
 my $timezone = "";
-my $epoch = 0;
 my $last_time = 0;
 my %session_action; my %session_start;
 
@@ -53,40 +52,37 @@ while (<>) {
     my $when = str2time("${date}T${time}");
     my $action = $session_action{$id};
     if ($when && $action) {
-      my $metric = "foreman.rails.duration.$action";
+      my $m_hit = "foreman.rails.hit.$action";
+      my $m_duration = "foreman.rails.duration.$action";
       my ($total) = ($rest =~ m/in ([0-9\.]+)ms/);
       my ($database) = ($rest =~ m/ActiveRecord: ([0-9\.]+)ms/);
       my ($views) = ($rest =~ m/Views: ([0-9\.]+)ms/);
-      #print "$when $metric $total $views $database\n";
-      ensure_duration_metric($metric);
-      my $result = pmiPutValue($metric, "total", $total);
+      #print "$when $m_duration $total $views $database\n";
+      ensure_duration_metric($m_duration);
+      my $result = pmiPutValue($m_duration, "total", $total);
       if ($result != 0) {
         my $msg = pmiErrStr($result);
-        die "Failed to put total value in '$metric', $msg\n";
+        die "Failed to put total value in '$m_duration', $msg\n";
       }
       if ($views) {
-        $result = pmiPutValue($metric, "view", $views);
+        $result = pmiPutValue($m_duration, "view", $views);
         if ($result != 0) {
           my $msg = pmiErrStr($result);
-          die "Failed to put view value in '$metric', $msg\n";
+          die "Failed to put view value in '$m_duration', $msg\n";
         }
       }
       if ($database) {
-        $result = pmiPutValue($metric, "db", $database);
+        $result = pmiPutValue($m_duration, "db", $database);
         if ($result != 0) {
           my $msg = pmiErrStr($result);
-          die "Failed to put db value in '$metric', $msg\n";
+          die "Failed to put db value in '$m_duration', $msg\n";
         }
       }
       delete $session_action{$id};
-      $result = pmiWrite($when, $epoch);
+      $result = pmiWrite($when, 0);
       if ($result != 0) {
         my $msg = pmiErrStr($result);
         die "Failed to write '$when', $msg\n";
-      }
-      if ($when > $last_time) {
-        $epoch = 0;
-        $last_time = $when;
       }
     }
   }
